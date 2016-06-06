@@ -121,9 +121,12 @@ class OAuth2Request(object):
         self.api = api
 
     def _generate_sig(self, endpoint, params, secret):
-        sig = endpoint
-        for key in sorted(params.keys()):
-            sig += '|%s=%s' % (key, params[key])
+        ## From https://github.com/facebookarchive/python-instagram/pull/195/files
+        # handle unicode when signing, urlencode can't handle otherwise
+        def enc_if_str(p):
+            return p.encode('utf-8') if isinstance(p, unicode) else p
+        p = ''.join('|{}={}'.format(k, enc_if_str(params[k])) for k in sorted(params.keys()))
+        sig = '{}{}'.format(endpoint, p)
         return hmac.new(secret.encode(), sig.encode(), sha256).hexdigest()
 
     def url_for_get(self, path, parameters):
@@ -135,16 +138,16 @@ class OAuth2Request(object):
     def post_request(self, path, **kwargs):
         return self.make_request(self.prepare_request("POST", path, kwargs))
 
-    def _full_url(self, path, include_secret=False, include_signed_request=True):
+    def _full_url(self, path, params, include_secret=False, include_signed_request=True):
         return "%s://%s%s%s%s%s" % (self.api.protocol,
                                   self.api.host,
                                   self.api.base_path,
                                   path,
                                   self._auth_query(include_secret),
-                                  self._signed_request(path, {}, include_signed_request, include_secret))
+                                  self._signed_request(path, params, include_signed_request, include_secret))
 
     def _full_url_with_params(self, path, params, include_secret=False, include_signed_request=True):
-        return (self._full_url(path, include_secret) + 
+        return (self._full_url(path, params, include_secret) + 
                 self._full_query_with_params(params) +
                 self._signed_request(path, params, include_signed_request, include_secret))
 
@@ -165,7 +168,7 @@ class OAuth2Request(object):
         if include_signed_request and self.api.client_secret is not None:
             if self.api.access_token:
                 params['access_token'] = self.api.access_token
-            elif self.api.client_id:
+            if self.api.client_id:
                 params['client_id'] = self.api.client_id
             if include_secret and self.api.client_secret:
                 params['client_secret'] = self.api.client_secret
@@ -219,12 +222,12 @@ class OAuth2Request(object):
             if method == "POST":
                 body = self._post_body(params)
                 headers = {'Content-type': 'application/x-www-form-urlencoded'}
-                url = self._full_url(path, include_secret)
+                url = self._full_url(path, params, include_secret)
             else:
                 url = self._full_url_with_params(path, params, include_secret)
         else:
             body, headers = self._encode_multipart(params, params['files'])
-            url = self._full_url(path)
+            url = self._full_url(path, params)
 
         return url, method, body, headers
 
